@@ -286,89 +286,106 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # --- Admin Panel ---
 async def admin_panel(update, context):
     if not is_admin(update.effective_user.id): return
-    text = (
-        "👑 *Admin Panel*\n\n"
-        "`/gencode` - Generate 5 new redeem codes.\n"
-        "`/userstats` - View all user stats.\n"
-        "`/broadcast <msg>` - Send a message to all users.\n"
-        "`/block <id>` - Block a user.\n"
-        "`/unblock <id>` - Unblock a user."
+async def admin_panel(update, context):
+    if not is_admin(update.effective_user.id):
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ Add Coins", callback_data="admin_add_coin"),
+            InlineKeyboardButton("➖ Remove Coins", callback_data="admin_remove_coin")
+        ],
+        [InlineKeyboardButton("🎟 Generate Codes", callback_data="admin_gencode")],
+        [InlineKeyboardButton("📊 User Stats", callback_data="admin_userstats")],
+        [
+            InlineKeyboardButton("🚫 Block User", callback_data="admin_block"),
+            InlineKeyboardButton("✅ Unblock User", callback_data="admin_unblock")
+        ]
+    ]
+
+    await update.message.reply_text(
+        "👑 **Admin Panel**\n\nSelect an option:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
     )
-    if is_owner(update.effective_user.id):
-        text += (
-            "\n\n🔑 *Owner Commands*\n"
-            "`/addadmin <id>` - Add a new admin.\n"
-            "`/removeadmin <id>` - Remove an admin.\n"
-            "`/listadmins` - See all admins."
-        )
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
-
-async def generate_code_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id): return
-    codes_text = "\n".join([f"`{db.generate_redeem_code()}`" for _ in range(5)])
-    await update.message.reply_text(f"✨ **5 new redeem codes** generated:\n\n{codes_text}\n\nEach is worth **5 coins**.", parse_mode=ParseMode.MARKDOWN)
-
 # --- Other Admin Commands ---
 # (Adding them back to ensure the file is complete)
-async def userstats(update, context):
-    if not is_admin(update.effective_user.id): return
-    user_data = db.load_json(db.USER_DATA_FILE, {})
-    users = db.load_json(db.USERS_FILE, {})
-    if not user_data:
-        await update.message.reply_text("📊 No user statistics available yet.")
-        return
-    
-    stats_text = "📊 <b>Top 20 User Statistics</b>\n\n"
-    sorted_users = sorted(user_data.items(), key=lambda item: item[1].get('sms_sent', 0), reverse=True)
-    
-    for user_id, data in sorted_users[:20]:
-        user_info = users.get(user_id, {"full_name": "Unknown", "username": "N/A"})
-        safe_name = html.escape(user_info['full_name'])
-        safe_username = html.escape(user_info.get('username', 'N/A'))
-        stats_text += f"👤 {safe_name} (@{safe_username})\n🆔 {user_id} | 💥 {data.get('sms_sent', 0)} SMS | 💰 {data.get('coins', 0)} Coins\n\n"
-    
-    await update.message.reply_text(stats_text, parse_mode=ParseMode.HTML)
+async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-async def block_user(update, context):
-    if not is_admin(update.effective_user.id): return
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Usage: /block <user_id>")
-        return
-    
-    user_id = int(context.args[0])
-    blocked = db.load_json(db.BLOCKED_USERS_FILE, [])
-    if user_id in blocked:
-        await update.message.reply_text(f"❌ User {user_id} is already blocked.")
-        return
-    
-    blocked.append(user_id)
-    db.save_json(db.BLOCKED_USERS_FILE, blocked)
-    await update.message.reply_text(f"✅ User {user_id} has been blocked.")
+    if not is_admin(query.from_user.id):
+        return ConversationHandler.END
 
-async def unblock_user(update, context):
-    if not is_admin(update.effective_user.id): return
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Usage: /unblock <user_id>")
-        return
-    
-    user_id = int(context.args[0])
-    blocked = db.load_json(db.BLOCKED_USERS_FILE, [])
-    if user_id not in blocked:
-        await update.message.reply_text(f"❌ User {user_id} is not blocked.")
-        return
-    
-    blocked.remove(user_id)
-    db.save_json(db.BLOCKED_USERS_FILE, blocked)
-    await update.message.reply_text(f"✅ User {user_id} has been unblocked.")
+    data = query.data
 
+    if data == "admin_add_coin":
+        context.user_data["admin_action"] = "add"
+        await query.edit_message_text(
+            "➕ **Add Coins**\n\nSend like:\n`USER_ID AMOUNT`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return ADMIN_ADD_COIN
 
-async def post_init(application: Application):
-    await application.bot.set_my_commands([
-        BotCommand("start", "Start the bot"),
-        BotCommand("redeem", "Redeem a code for coins"),
-        BotCommand("admin", "Admin panel (Admins only)"),
-    ])
-    logger.info("Custom commands set!")
+    if data == "admin_remove_coin":
+        context.user_data["admin_action"] = "remove"
+        await query.edit_message_text(
+            "➖ **Remove Coins**\n\nSend like:\n`USER_ID AMOUNT`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return ADMIN_REMOVE_COIN
+
+    if data == "admin_gencode":
+        codes = "\n".join([f"`{db.generate_redeem_code()}`" for _ in range(5)])
+        await query.edit_message_text(
+            f"🎟 **Redeem Codes**\n\n{codes}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    if data == "admin_userstats":
+        stats = db.load_json(db.STATS_FILE, {"total_users": 0, "total_sms_sent": 0})
+        await query.edit_message_text(
+            f"📊 **Bot Stats**\n\n"
+            f"👥 Users: {stats['total_users']}\n"
+            f"💥 SMS Sent: {stats['total_sms_sent']}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    if data == "admin_block":
+        await query.edit_message_text(
+            "🚫 Use command:\n`/block USER_ID`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    if data == "admin_unblock":
+        await query.edit_message_text(
+            "✅ Use command:\n`/unblock USER_ID`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    return ConversationHandler.END
+async def admin_coin_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return ConversationHandler.END
+
+    try:
+        user_id, amount = map(int, update.message.text.split())
+    except:
+        await update.message.reply_text("❌ Format error.\nUse: `USER_ID AMOUNT`", parse_mode=ParseMode.MARKDOWN)
+        return ConversationHandler.END
+
+    action = context.user_data.get("admin_action")
+
+    if action == "add":
+        db.add_coins(user_id, amount)
+        await update.message.reply_text(f"✅ Added {amount} coins to `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+
+    elif action == "remove":
+        db.add_coins(user_id, -amount)
+        await update.message.reply_text(f"➖ Removed {amount} coins from `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+
+    context.user_data.clear()
+    return ConversationHandler.END
 
 def main():
     db.initialize_files()
@@ -391,6 +408,17 @@ def main():
     application.add_handler(MessageHandler(filters.Text(STATISTICS_TEXT), statistics_command))
     application.add_handler(MessageHandler(filters.Text(ACCOUNT_TEXT), my_account))
     application.add_handler(MessageHandler(filters.Text(BONUS_TEXT), daily_bonus))
+    admin_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(admin_button_handler, pattern="^admin_")],
+    states={
+        ADMIN_ADD_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_coin_process)],
+        ADMIN_REMOVE_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_coin_process)],
+    },
+    fallbacks=[]
+)
+
+application.add_handler(CommandHandler("admin", admin_panel))
+application.add_handler(admin_conv)
     
     admin_filter = filters.User(user_id=db.load_json(db.ADMINS_FILE, []) + [OWNER_ID])
     application.add_handler(CommandHandler("admin", admin_panel, filters=admin_filter))
